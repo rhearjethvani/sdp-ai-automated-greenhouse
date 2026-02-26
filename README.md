@@ -50,6 +50,72 @@ npm run dev
 - Click on "New codespace" to launch a new Codespace environment.
 - Edit files directly within the Codespace and commit and push your changes once you're done.
 
+## Running the Greenhouse System
+
+The project has two parts that must run at the same time: the **Flask backend** (controls the hardware) and the **Vite frontend** (the web dashboard).
+
+### 1. Raspberry Pi — Flask backend
+
+The backend reads sensors and drives the relays. Run this on the Pi (or any machine for simulation mode).
+
+**First-time setup:**
+```sh
+# Install Python dependencies
+pip install flask flask-cors
+
+# On the Pi, also install the hardware libraries
+pip install RPLCD gpiozero adafruit-circuitpython-dht pyftdi
+```
+
+**Start the server:**
+```sh
+python server.py
+```
+
+The server starts on **port 5000**. If the hardware libraries are not installed it automatically runs in simulation mode with random sensor values — useful for development on a non-Pi machine.
+
+> **Note:** If you are running the Pi headlessly, you can keep the server alive with:
+> ```sh
+> nohup python server.py &
+> ```
+
+---
+
+### 2. Web dashboard — Vite frontend
+
+Run this on any machine that can reach the Pi over the network (or on the Pi itself).
+
+**First-time setup:**
+```sh
+npm install
+```
+
+**Start the dev server:**
+```sh
+npm run dev
+```
+
+The dashboard opens at **http://localhost:8080**. All `/api/*` requests are automatically proxied to `http://localhost:5000` (the Flask server).
+
+> **Connecting from a different machine:** open `vite.config.ts` and change the proxy target from `http://localhost:5000` to the Pi's IP address, e.g. `http://192.168.1.42:5000`.
+
+---
+
+### API endpoints (Flask)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/status` | GET | Current state of all devices + sensor readings |
+| `/api/pump/on` | POST | Turn irrigation pump ON |
+| `/api/pump/off` | POST | Turn irrigation pump OFF |
+| `/api/light/on` | POST | Turn grow light ON |
+| `/api/light/off` | POST | Turn grow light OFF |
+| `/api/fan/on` | POST | Turn ventilation fan ON |
+| `/api/fan/off` | POST | Turn ventilation fan OFF |
+| `/api/logs` | GET | Last 100 lines of `Greenhouse.txt` |
+
+---
+
 ## What technologies are used for this project?
 
 This project is built with:

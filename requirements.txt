@@ -1,0 +1,7 @@
+flask
+flask-cors
+# Raspberry Pi / hardware – comment these out on a dev machine
+# RPLCD
+# gpiozero
+# adafruit-circuitpython-dht
+# pyftdi

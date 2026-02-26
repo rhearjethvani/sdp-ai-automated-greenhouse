@@ -21,6 +21,18 @@ interface DeviceState {
   fan: boolean;
 }
 
+// ── helpers ────────────────────────────────────────────────────────────────
+
+async function callDeviceApi(device: keyof DeviceState, on: boolean) {
+  try {
+    await fetch(`/api/${device}/${on ? 'on' : 'off'}`, { method: 'POST' });
+  } catch (err) {
+    console.error(`[ControlsPanel] API call failed for ${device}:`, err);
+  }
+}
+
+// ── component ──────────────────────────────────────────────────────────────
+
 const ControlsPanel = () => {
   const [mode, setMode] = useState<Mode>('auto');
   const [autoStates] = useState({ pump: true, light: true, fan: false });
@@ -30,14 +42,28 @@ const ControlsPanel = () => {
     fan: false,
   });
 
-  const toggleManual = (device: keyof DeviceState) => {
-    setManualStates(prev => ({ ...prev, [device]: !prev[device] }));
+  const toggleManual = async (device: keyof DeviceState) => {
+    const next = !manualStates[device];
+    setManualStates(prev => ({ ...prev, [device]: next }));
+    await callDeviceApi(device, next);
+  };
+
+  // When switching to Auto, turn off any manually-activated devices
+  const handleModeChange = async (next: Mode) => {
+    if (next === 'auto') {
+      const toTurnOff = (Object.keys(manualStates) as (keyof DeviceState)[]).filter(
+        d => manualStates[d],
+      );
+      setManualStates({ pump: false, light: false, fan: false });
+      await Promise.all(toTurnOff.map(d => callDeviceApi(d, false)));
+    }
+    setMode(next);
   };
 
   const devices = [
-    { key: 'pump' as const, label: 'Irrigation Pump', icon: Droplets, needsConfirm: true },
-    { key: 'light' as const, label: 'Grow Light', icon: Sun, needsConfirm: false },
-    { key: 'fan' as const, label: 'Ventilation Fan', icon: Wind, needsConfirm: false },
+    { key: 'pump'  as const, label: 'Irrigation Pump',  icon: Droplets, needsConfirm: true  },
+    { key: 'light' as const, label: 'Grow Light',        icon: Sun,      needsConfirm: false },
+    { key: 'fan'   as const, label: 'Ventilation Fan',   icon: Wind,     needsConfirm: false },
   ];
 
   return (
@@ -52,7 +78,7 @@ const ControlsPanel = () => {
       {/* Mode Toggle */}
       <div className="flex rounded-lg bg-secondary p-1 mb-4">
         <button
-          onClick={() => setMode('auto')}
+          onClick={() => handleModeChange('auto')}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition-colors ${
             mode === 'auto'
               ? 'bg-card text-primary shadow-sm'
@@ -63,7 +89,7 @@ const ControlsPanel = () => {
           Auto
         </button>
         <button
-          onClick={() => setMode('manual')}
+          onClick={() => handleModeChange('manual')}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium transition-colors ${
             mode === 'manual'
               ? 'bg-card text-accent shadow-sm'
@@ -105,6 +131,7 @@ const ControlsPanel = () => {
                   {isOn ? 'Active' : 'Standby'}
                 </span>
               ) : device.needsConfirm && !manualStates[device.key] ? (
+                /* Pump: show confirmation dialog before turning ON */
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Switch checked={false} />
@@ -113,7 +140,8 @@ const ControlsPanel = () => {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Activate {device.label}?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This will manually activate the irrigation pump. Make sure the water supply is connected.
+                        This will manually activate the irrigation pump. Make sure the water
+                        supply is connected.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
