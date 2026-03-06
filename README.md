@@ -59,6 +59,7 @@ The project has two parts that must run at the same time: the **Flask backend** 
 The backend reads sensors and drives the relays. Run this on the Pi (or any machine for simulation mode).
 
 **First-time setup:**
+
 ```sh
 # Install Python dependencies
 pip install flask flask-cors
@@ -68,6 +69,7 @@ pip install RPLCD gpiozero adafruit-circuitpython-dht pyftdi
 ```
 
 **Start the server:**
+
 ```sh
 python server.py
 ```
@@ -75,6 +77,7 @@ python server.py
 The server starts on **port 5000**. If the hardware libraries are not installed it automatically runs in simulation mode with random sensor values — useful for development on a non-Pi machine.
 
 > **Note:** If you are running the Pi headlessly, you can keep the server alive with:
+>
 > ```sh
 > nohup python server.py &
 > ```
@@ -86,11 +89,13 @@ The server starts on **port 5000**. If the hardware libraries are not installed 
 Run this on any machine that can reach the Pi over the network (or on the Pi itself).
 
 **First-time setup:**
+
 ```sh
 npm install
 ```
 
 **Start the dev server:**
+
 ```sh
 npm run dev
 ```
@@ -103,16 +108,16 @@ The dashboard opens at **http://localhost:8080**. All `/api/*` requests are auto
 
 ### API endpoints (Flask)
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/status` | GET | Current state of all devices + sensor readings |
-| `/api/pump/on` | POST | Turn irrigation pump ON |
-| `/api/pump/off` | POST | Turn irrigation pump OFF |
-| `/api/light/on` | POST | Turn grow light ON |
-| `/api/light/off` | POST | Turn grow light OFF |
-| `/api/fan/on` | POST | Turn ventilation fan ON |
-| `/api/fan/off` | POST | Turn ventilation fan OFF |
-| `/api/logs` | GET | Last 100 lines of `Greenhouse.txt` |
+| Endpoint         | Method | Description                                    |
+| ---------------- | ------ | ---------------------------------------------- |
+| `/api/status`    | GET    | Current state of all devices + sensor readings |
+| `/api/pump/on`   | POST   | Turn irrigation pump ON                        |
+| `/api/pump/off`  | POST   | Turn irrigation pump OFF                       |
+| `/api/light/on`  | POST   | Turn grow light ON                             |
+| `/api/light/off` | POST   | Turn grow light OFF                            |
+| `/api/fan/on`    | POST   | Turn ventilation fan ON                        |
+| `/api/fan/off`   | POST   | Turn ventilation fan OFF                       |
+| `/api/logs`      | GET    | Last 100 lines of `Greenhouse.txt`             |
 
 ---
 
@@ -137,3 +142,42 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+---
+
+## ML backend (drying prediction)
+
+This repository now includes a lightweight ML backend (FastAPI) that predicts the probability the soil will be dry in the next hour.
+
+Files added: `backend/train.py`, `backend/api.py`, `backend/requirements.txt`.
+
+Quick start:
+
+1. Create a Python environment and install dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # or .venv\\Scripts\\activate on Windows
+pip install -r backend/requirements.txt
+```
+
+2. Train the model (creates `backend/model.joblib`):
+
+```bash
+python backend/train.py
+```
+
+3. Start the FastAPI server:
+
+```bash
+uvicorn backend.api:app --reload --port 8000
+```
+
+4. Start the frontend (in a separate shell):
+
+```bash
+npm install
+npm run dev
+```
+
+The frontend will call the ML API at `http://localhost:8000` by default. You can override the backend URL by setting `VITE_BACKEND_URL` in your environment (or `.env`) if needed.

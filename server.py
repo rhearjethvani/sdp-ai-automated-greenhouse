@@ -132,8 +132,12 @@ else:
 
 @app.route("/api/status")
 def get_status():
-    with lock:
-        return jsonify(dict(state))
+    try:
+        with lock:
+            return jsonify(dict(state))
+    except Exception as e:
+        print(f"Error in /api/status: {e}")
+        return "Internal Server Error", 500
 
 
 @app.route("/api/pump/on",  methods=["POST"])

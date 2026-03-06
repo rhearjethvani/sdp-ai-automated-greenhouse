@@ -1,43 +1,94 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Brain, TrendingDown, Clock, Activity } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Legend,
 } from 'recharts';
-import { moistureHistory, moistureForecast } from '@/lib/greenhouse-data';
+import { moistureHistory, buildDryForecast, sensorData } from '@/lib/greenhouse-data';
+
+// helper: convert historical percent readings to binary moisture sensor (0=wet,1=dry)
+function toBinary(value: number, threshold = 30) {
+  return value < threshold ? 1 : 0;
+}
 
 const PredictionPanel = () => {
   const [showPredicted, setShowPredicted] = useState(true);
   const [showHistorical, setShowHistorical] = useState(true);
 
-  // Combine data for the chart
+  // Combine data for the chart (historical is binary 0/1, predicted is percentage 0-100)
+  const [forecastData, setForecastData] = useState<Array<{ time: string; predicted: number }>>([]);
+
   const historicalData = moistureHistory.map(d => ({
     time: d.time,
-    actual: d.value,
+    actual: toBinary(d.value),
     predicted: null as number | null,
   }));
 
-  const forecastData = moistureForecast.map(d => ({
-    time: d.time,
-    actual: null as number | null,
-    predicted: d.value,
-  }));
-
-  // Bridge point
+  // Bridge point based on last historical sample
   const lastActual = moistureHistory[moistureHistory.length - 1];
   const bridgePoint = {
     time: lastActual.time,
-    actual: lastActual.value,
-    predicted: lastActual.value,
+    actual: toBinary(lastActual.value),
+    predicted: null as number | null,
   };
 
-  const chartData = showHistorical && showPredicted
-    ? [...historicalData, bridgePoint, ...forecastData]
-    : showHistorical
-      ? historicalData
-      : showPredicted
-        ? [bridgePoint, ...forecastData]
-        : [];
+  // Load predictions from backend on mount. Prefer live hardware via `/api/status`,
+  // fall back to bundled `sensorData` mock when the Flask server is not running.
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      // try live status from Flask backend (proxied at /api/status)
+      try {
+        const resp = await fetch('/api/status');
+        if (!resp.ok) throw new Error('no-status');
+        const status = await resp.json();
+
+        // `status` shape from server.py: { soil: 'wet'|'dry', temp_f: number, humidity: number, ... }
+        let currentBinary = 0;
+        if (typeof status.soil === 'string') {
+          currentBinary = status.soil.toLowerCase() === 'dry' ? 1 : 0;
+        } else if (typeof status.soil === 'number') {
+          // hardware might report 0/1
+          currentBinary = status.soil ? 1 : 0;
+        }
+
+        const temp = status.temp_f ?? (sensorData.find(s => s.label === 'Temperature') || sensorData[1]).current;
+        const hum = status.humidity ?? (sensorData.find(s => s.label === 'Humidity') || sensorData[2]).current;
+
+        const preds = await buildDryForecast(currentBinary, temp as number, hum as number, 6);
+        if (!mounted) return;
+        setForecastData(preds.map(p => ({ time: p.time, predicted: p.value })));
+        return;
+      } catch (e) {
+        // fallback to bundled mock
+      }
+
+      // fallback: use bundled mock sensorData
+      const soil = sensorData.find(s => s.label === 'Soil Moisture') || sensorData[0];
+      const temp = (sensorData.find(s => s.label === 'Temperature') || sensorData[1]).current;
+      const hum = (sensorData.find(s => s.label === 'Humidity') || sensorData[2]).current;
+      const currentBinary = toBinary(soil.current, soil.threshold.low);
+      const preds = await buildDryForecast(currentBinary, temp as number, hum as number, 6);
+      if (!mounted) return;
+      setForecastData(preds.map(p => ({ time: p.time, predicted: p.value })));
+    })();
+
+    return () => { mounted = false; };
+  }, []);
+
+  const chartData = (() => {
+    if (showHistorical && showPredicted) {
+      return [
+        ...historicalData,
+        bridgePoint,
+        ...forecastData.map(d => ({ time: d.time, actual: null, predicted: d.predicted })),
+      ];
+    }
+    if (showHistorical) return historicalData;
+    if (showPredicted) return [bridgePoint, ...forecastData.map(d => ({ time: d.time, actual: null, predicted: d.predicted }))];
+    return [];
+  })();
 
   return (
     <div className="ai-panel animate-fade-in">
@@ -51,24 +102,44 @@ const PredictionPanel = () => {
         </div>
       </div>
 
-      {/* Key metrics */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="bg-card/70 rounded-lg p-3 text-center">
-          <TrendingDown className="w-4 h-4 mx-auto mb-1 text-sensor-yellow" />
-          <p className="text-xs text-muted-foreground">Threshold breach</p>
-          <p className="text-sm font-semibold text-foreground">~3.2 hrs</p>
-        </div>
-        <div className="bg-card/70 rounded-lg p-3 text-center">
-          <Clock className="w-4 h-4 mx-auto mb-1 text-primary" />
-          <p className="text-xs text-muted-foreground">Recommended</p>
-          <p className="text-sm font-semibold text-foreground">Water in 2.5h</p>
-        </div>
-        <div className="bg-card/70 rounded-lg p-3 text-center">
-          <Activity className="w-4 h-4 mx-auto mb-1 text-sensor-green" />
-          <p className="text-xs text-muted-foreground">Confidence</p>
-          <p className="text-sm font-semibold text-foreground">91%</p>
-        </div>
-      </div>
+          {/* Key metrics: threshold breach, time-to-dry, confidence (derived from predictions) */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-card/70 rounded-lg p-3 text-center">
+              <TrendingDown className="w-4 h-4 mx-auto mb-1 text-sensor-yellow" />
+              <p className="text-xs text-muted-foreground">Threshold breach</p>
+              <p className="text-sm font-semibold text-foreground">{/* display soil threshold info */}
+                {(() => {
+                  const soil = sensorData.find(s => s.label === 'Soil Moisture');
+                  return soil ? `${soil.threshold.low}${soil.unit ?? ''}` : '30%';
+                })()}
+              </p>
+            </div>
+            <div className="bg-card/70 rounded-lg p-3 text-center">
+              <Clock className="w-4 h-4 mx-auto mb-1 text-primary" />
+              <p className="text-xs text-muted-foreground">Time to dry</p>
+              <p className="text-sm font-semibold text-foreground">
+                {useMemo(() => {
+                  if (!forecastData || forecastData.length === 0) return '—';
+                  // find first hour where predicted >= 50%
+                  const idx = forecastData.findIndex(f => (f.predicted ?? 0) >= 50);
+                  if (idx === -1) return '>6h';
+                  return `${idx + 1}h`;
+                }, [forecastData])}
+              </p>
+            </div>
+            <div className="bg-card/70 rounded-lg p-3 text-center">
+              <Activity className="w-4 h-4 mx-auto mb-1 text-sensor-green" />
+              <p className="text-xs text-muted-foreground">Confidence</p>
+              <p className="text-sm font-semibold text-foreground">
+                {useMemo(() => {
+                  if (!forecastData || forecastData.length === 0) return '—';
+                  // confidence = max predicted probability across forecast (rounded)
+                  const max = Math.max(...forecastData.map(f => f.predicted ?? 0));
+                  return `${Math.round(max)}%`;
+                }, [forecastData])}
+              </p>
+            </div>
+          </div>
 
       {/* Toggles */}
       <div className="flex gap-3 mb-3">

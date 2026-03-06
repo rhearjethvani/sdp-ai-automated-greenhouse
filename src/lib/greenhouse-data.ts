@@ -55,6 +55,54 @@ function generateForecast(lastValue: number, trend: number, points = 6): SensorR
   return data;
 }
 
+// Build a dry-forecast by calling the backend ML API. Returns values as percentage (0-100).
+export async function buildDryForecast(
+  currentMoisture: number,
+  temperature: number,
+  humidity: number,
+  points = 6,
+): Promise<SensorReading[]> {
+  const apiBase = process.env.VITE_BACKEND_URL || "http://localhost:8000";
+  const results: SensorReading[] = [];
+
+  // working copy of state
+  let moistureState = currentMoisture ? 1 : 0;
+  let temp = temperature;
+  let hum = humidity;
+
+  for (let i = 1; i <= points; i++) {
+    try {
+      const resp = await fetch(`${apiBase}/predict/dry_next_hour`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moisture: moistureState, temperature: temp, humidity: hum }),
+      });
+      if (!resp.ok) throw new Error("bad response");
+      const json = await resp.json();
+      const prob = Number(json.dry_probability) || 0;
+      const now = new Date();
+      const t = new Date(now.getTime() + i * 60 * 60 * 1000);
+      const hour = t.getHours();
+      results.push({ time: `${hour.toString().padStart(2, '0')}:00`, value: Math.round(prob * 1000) / 10 });
+
+      // iterative step: consider predicted probability > 0.5 as dry for next step
+      moistureState = prob >= 0.5 ? 1 : 0;
+
+      // small random drift for temp/humidity to make multi-step more realistic
+      temp = Math.round((temp + (Math.random() - 0.5) * 1.5) * 10) / 10;
+      hum = Math.round((hum + (Math.random() - 0.5) * 2) * 10) / 10;
+    } catch (e) {
+      // fallback: use local simple forecast if backend not reachable
+      return generateForecast(currentMoisture ? 100 : 0, currentMoisture ? -5 : -2, points).map((d) => ({
+        time: d.time,
+        value: Math.max(0, Math.min(100, d.value)),
+      }));
+    }
+  }
+
+  return results;
+}
+
 export const sensorData: SensorData[] = [
   {
     label: 'Soil Moisture',
@@ -95,7 +143,6 @@ export const sensorData: SensorData[] = [
 ];
 
 export const moistureHistory = generateHistory(50, 15);
-export const moistureForecast = generateForecast(42, -2.5, 6);
 
 export const alerts: Alert[] = [
   { id: '1', type: 'warning', message: 'Moisture trending below threshold', time: '2 min ago' },
