@@ -41,6 +41,11 @@ state = {
     "humidity": None,
 }
 
+# Auto-water: minimum seconds between automatic watering cycles
+AUTO_WATER_COOLDOWN = 60
+AUTO_WATER_DURATION = 3
+_last_auto_water_time: float = 0
+
 # ── Log file ───────────────────────────────────────────────────────────────
 script_dir    = os.path.dirname(os.path.abspath(__file__))
 log_file_path = os.path.join(script_dir, "Greenhouse.txt")
@@ -68,9 +73,38 @@ def _build_relay_mask() -> int:
 
 
 def _apply_relays():
-    if not HARDWARE_AVAILABLE:
+    if HARDWARE_AVAILABLE:
+        gpio.write(_build_relay_mask())
+
+
+def _run_auto_water():
+    """Turn pump on for AUTO_WATER_DURATION seconds when soil is dry. Respects cooldown."""
+    global _last_auto_water_time
+    now = time.monotonic()
+    if now - _last_auto_water_time < AUTO_WATER_COOLDOWN:
         return
-    gpio.write(_build_relay_mask())
+    with lock:
+        state["pump"] = True
+    _apply_relays()
+    log_event("PUMP ON (auto – soil dry)")
+    time.sleep(AUTO_WATER_DURATION)
+    with lock:
+        state["pump"] = False
+    _apply_relays()
+    log_event("PUMP OFF (auto)")
+    _last_auto_water_time = time.monotonic()
+
+
+def _auto_water_monitor():
+    """Watch soil state and run pump automatically when it becomes dry."""
+    last_soil = None
+    while True:
+        with lock:
+            soil = state["soil"]
+        if soil == "dry" and last_soil != "dry":
+            _run_auto_water()
+        last_soil = soil
+        time.sleep(2)
 
 
 # ── Hardware initialisation (Pi only) ─────────────────────────────────────
@@ -114,6 +148,7 @@ if HARDWARE_AVAILABLE:
 
     threading.Thread(target=_soil_monitor, daemon=True).start()
     threading.Thread(target=_dht_monitor,  daemon=True).start()
+    threading.Thread(target=_auto_water_monitor, daemon=True).start()
 else:
     # Simulation: fake sensor values so the UI still works on a dev machine
     import random
@@ -126,6 +161,7 @@ else:
             time.sleep(5)
 
     threading.Thread(target=_sim_sensors, daemon=True).start()
+    threading.Thread(target=_auto_water_monitor, daemon=True).start()
 
 
 # ── API routes ─────────────────────────────────────────────────────────────

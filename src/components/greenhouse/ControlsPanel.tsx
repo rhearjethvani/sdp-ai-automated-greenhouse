@@ -1,22 +1,10 @@
 import { useState } from 'react';
 import { Power, Droplets, Sun, Wind, ShieldCheck, Hand } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
 
 type Mode = 'auto' | 'manual';
 
 interface DeviceState {
-  pump: boolean;
   light: boolean;
   fan: boolean;
 }
@@ -35,9 +23,8 @@ async function callDeviceApi(device: keyof DeviceState, on: boolean) {
 
 const ControlsPanel = () => {
   const [mode, setMode] = useState<Mode>('auto');
-  const [autoStates] = useState({ pump: true, light: true, fan: false });
+  const [autoStates] = useState({ light: true, fan: false });
   const [manualStates, setManualStates] = useState<DeviceState>({
-    pump: false,
     light: false,
     fan: false,
   });
@@ -48,22 +35,20 @@ const ControlsPanel = () => {
     await callDeviceApi(device, next);
   };
 
-  // When switching to Auto, turn off any manually-activated devices
   const handleModeChange = async (next: Mode) => {
     if (next === 'auto') {
       const toTurnOff = (Object.keys(manualStates) as (keyof DeviceState)[]).filter(
         d => manualStates[d],
       );
-      setManualStates({ pump: false, light: false, fan: false });
+      setManualStates({ light: false, fan: false });
       await Promise.all(toTurnOff.map(d => callDeviceApi(d, false)));
     }
     setMode(next);
   };
 
-  const devices = [
-    { key: 'pump'  as const, label: 'Irrigation Pump',  icon: Droplets, needsConfirm: true  },
-    { key: 'light' as const, label: 'Grow Light',        icon: Sun,      needsConfirm: false },
-    { key: 'fan'   as const, label: 'Ventilation Fan',   icon: Wind,     needsConfirm: false },
+  const manualDevices = [
+    { key: 'light' as const, label: 'Grow Light', icon: Sun },
+    { key: 'fan' as const, label: 'Ventilation Fan', icon: Wind },
   ];
 
   return (
@@ -101,9 +86,27 @@ const ControlsPanel = () => {
         </button>
       </div>
 
-      {/* Devices */}
+      {/* Irrigation Pump – auto only, no manual control */}
+      <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <Droplets className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">Irrigation Pump</p>
+            <p className="text-xs text-muted-foreground">
+              Waters automatically when soil is dry
+            </p>
+          </div>
+        </div>
+        <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10 text-primary">
+          Auto
+        </span>
+      </div>
+
+      {/* Manual-control devices */}
       <div className="space-y-3">
-        {devices.map(device => {
+        {manualDevices.map(device => {
           const Icon = device.icon;
           const isOn = mode === 'auto' ? autoStates[device.key] : manualStates[device.key];
 
@@ -130,28 +133,6 @@ const ControlsPanel = () => {
                 }`}>
                   {isOn ? 'Active' : 'Standby'}
                 </span>
-              ) : device.needsConfirm && !manualStates[device.key] ? (
-                /* Pump: show confirmation dialog before turning ON */
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Switch checked={false} />
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Activate {device.label}?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will manually activate the irrigation pump. Make sure the water
-                        supply is connected.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => toggleManual(device.key)}>
-                        Activate
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
               ) : (
                 <Switch
                   checked={isOn}
